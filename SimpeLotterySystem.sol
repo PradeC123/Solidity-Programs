@@ -1,4 +1,4 @@
-pragma solidity ^0.8.0;
+pragma solidity <0.8.0;
 
 contract Lottery {
     address owner;
@@ -43,9 +43,19 @@ contract Lottery {
         
         // Send all Ether held by the contract to the winner
         uint prize = address(this).balance;
-        winner.transfer(prize); 
+        uint ownerPrize = prize / 10; // 10% for owner
+        uint winnerPrize = prize - ownerPrize; // 90% for winner
+        
+        // Transfer the prizes
+        owner.transfer(ownerPrize);
+        winner.transfer(winnerPrize);
 
         // Emit the WinnerChosen event
         emit WinnerChosen(winner, prize, block.timestamp);
+        // Reset lottery for next round
+        for (uint i = 0; i < joinLottery.length; i++) {
+            hasJoined[joinLottery[i]] = false;
+        }
+        delete joinLottery;
     }
 }
