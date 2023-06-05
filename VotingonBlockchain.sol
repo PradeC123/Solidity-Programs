@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.0;
+pragma solidity >=0.8.0;
 
 contract Election{ 
     //-----------------------Struct for Candidate and Voters---------------------------------// 
@@ -9,11 +9,14 @@ contract Election{
         string proposal;
         string Party; 
         address CandidateAddress;
+        address payable deposit; 
     }
     struct Voter{
         string Votname; 
         address VoterAddress; 
-        uint voteCount; 
+        uint voteCount;
+        uint votedCandidateId; // add this line to track voted candidate
+        bool isDelegated; // add this line to track delegation status
     }
     //--------------------------Mappings in the Contract--------------------------------------------//
     mapping(uint => Candidate) public Candidates;  
@@ -54,11 +57,13 @@ contract Election{
     //------------------------------------------------------------------------------------//
     // Function 1: Add new Candidate
     uint public candidatesCount = 1; 
+    uint minimumDeposit = 0.01 ether;
 
     function addCandidate(string memory _Candidatename, 
     string memory _proposal,
     string memory _party,  
-    address _CandidateAddress) public adminOnly{
+    address _CandidateAddress,
+    address payable _deposit) public payable adminOnly{
         // Require Conditions
         require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[0])), "Election has already started");
         require(_CandidateAddress != address(0), "Candidate address cannot be zero");
@@ -67,14 +72,17 @@ contract Election{
             require(Candidates[i].CandidateAddress != _CandidateAddress, "This candidate is already registered");
         }
         require(bytes(_Candidatename).length > 0, "Candidate name cannot be empty");
-        require(bytes(_party).length > 0, "Party name cannot be empty");    
+        require(bytes(_party).length > 0, "Party name cannot be empty");  
+        require(msg.value >= minimumDeposit, "Minimum deposit amount not met");
+  
 
         // Adding Candidates 
         Candidates[candidatesCount] = Candidate(candidatesCount,
          _Candidatename, 
          _proposal,
          _party,
-         _CandidateAddress);
+         _CandidateAddress,
+         _deposit);
 
          candidatesCount++; 
          
@@ -109,7 +117,7 @@ contract Election{
         require(bytes(_Votname).length > 0, "Voter name cannot be empty"); 
 
         //Adding Voters (Default 1 vote per Voter)
-        Voters[_VoterAddress] = Voter(_Votname, _VoterAddress, 1); 
+        Voters[_VoterAddress] = Voter(_Votname, _VoterAddress, 1, 0, false); 
         VoterCount++;
         
         //Emit
@@ -118,14 +126,11 @@ contract Election{
     //------------------------------------------------------------------------------------//
     // Function 10: Display Voter Details 
 
-    function displayVoter(address _VoterAddress) public view returns (string memory,
-    address){
-        // Require Conditions
-
-        // Display Candidates details
-        return (Voters[_VoterAddress].Votname,
-        Voters[_VoterAddress].VoterAddress);
-    }
+    function viewVoterProfile(address _VoterAddress) public view returns (string memory, uint, bool) {
+        return (Voters[_VoterAddress].Votname, 
+        Voters[_VoterAddress].votedCandidateId, 
+        Voters[_VoterAddress].isDelegated);
+}
     //--------------------------- Start of Elections -------------------------------------//
     //------------------------------------------------------------------------------------//
     // Function 3: Start the Election 
@@ -167,7 +172,9 @@ contract Election{
         Voter storage delegateProfile = Voters[_delegateAddress]; 
 
         delegateProfile. voteCount += ownerProfile.voteCount; 
-        ownerProfile.voteCount = 0; 
+        ownerProfile.voteCount = 0;
+        ownerProfile.isDelegated = true;  // add this line to update delegation status
+
         // Emit 
         emit DelegateVote(_ownership, _delegateAddress); 
     }
@@ -188,6 +195,7 @@ contract Election{
         //--------Voting------------
         // Decrease voter's count
         Voters[_Voteraddress].voteCount--;
+        Voters[_Voteraddress].votedCandidateId = _CandidateId;
 
         // Increase candidate's vote count
         Votes[_CandidateId]++;
@@ -206,6 +214,22 @@ contract Election{
 
         // End the election 
         ElectionStatus = ElectionStatus_Arr[2];
+
+        // Calculate the minimum threshold for deposit return (e.g., 10% of total votes)
+        uint minimumThreshold = totalVotes * 10 / 100;
+
+        // Iterate over the candidates to determine deposit return or confiscation
+        for (uint i = 1; i < candidatesCount; i++) {
+            Candidate storage candidate = Candidates[i];
+
+            // Return deposit if candidate meets the minimum threshold of votes
+            if (Votes[i] >= minimumThreshold) {
+                candidate.deposit.transfer(candidate.deposit);
+            } else {
+            // Confiscate deposit by not transferring it back to the candidate
+            continue; 
+            }
+    }
 
         // Emit 
         emit EndElection(ElectionStatus); 
@@ -280,4 +304,24 @@ contract Election{
         Votes[_CandidateId]
         );
     }
+    //------------------------------------------------------------------------------------//
+    // Function 11: Reset Elections or Conducting Fresh Elections. 
+
+    function resetElection() public adminOnly {
+    // Require Conditions
+    // The election should have already ended
+    require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[2])), "Election has not ended yet");
+
+    // Reset state variables
+    for (uint i = 1; i < candidatesCount; i++) {
+        delete Candidates[i];
+        delete Votes[i];
+    }
+    candidatesCount = 1;
+    VoterCount = 0;
+    ElectionStatus = ElectionStatus_Arr[0];
+    // Emit
+    emit StartElection(ElectionStatus);
+    }
+
 }
