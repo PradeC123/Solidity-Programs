@@ -310,7 +310,7 @@ contract Election{
         Candidate storage candidate = Candidates[i];
 
         // Return deposit if candidate meets the minimum threshold of votes
-        if (Votes[i] >= minimumThreshold) {
+        if (Votes[i] > minimumThreshold) {
             payable(candidate.CandidateAddress).transfer(candidate.depositAmount);
         } else {
             // Confiscate deposit by not transferring it back to the candidate
