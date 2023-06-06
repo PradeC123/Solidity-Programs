@@ -2,15 +2,17 @@
 pragma solidity >=0.8.0;
 
 contract Election{ 
-    //-----------------------Struct for Candidate and Voters---------------------------------// 
+    //-------------Struct for Candidate and Voters-----------------------// 
     struct Candidate{
         uint id; 
         string Candidatename; 
         string proposal;
         string Party; 
-        address CandidateAddress;
-        address payable deposit; 
+        address payable CandidateAddress;
+        uint depositAmount;
+        bool isRegistered;
     }
+
     struct Voter{
         string Votname; 
         address VoterAddress; 
@@ -18,26 +20,29 @@ contract Election{
         uint votedCandidateId; // add this line to track voted candidate
         bool isDelegated; // add this line to track delegation status
     }
-    //--------------------------Mappings in the Contract--------------------------------------------//
+    //--------------------------Mappings in the Contract-----------------//
     mapping(uint => Candidate) public Candidates;  
     mapping(address => Voter) public Voters;
     mapping(uint => uint) public Votes; // Each candidate's vote count
-    //----------------------------------Event----------------------------------------------//
+    //----------------------------------Event----------------------------//
     event transferOwnershipadd(address owner);
     event AddCandidate(uint id, string Candname, string Party, address CandidateAddress);
+    event DepositSubmitted(uint candidateId, uint amount);
+    event NominationWithdrawn(uint candidateId);
+    event CandidateRemoved(uint candidateId);
     event AddVoter(string Votname, address VoterAddress);
     event StartElection(string ElectionStatus);
     event DelegateVote(address ownership, address delegateAddress); 
     event CastVote(address VoterAddress);
     event EndElection(string ElectionStatus);
     event ShowWinner(string Candname, string Party, uint VoteCount); 
-    //-----------------------------Owner of the contract------------------------------------// 
-    address public owner; // Address of the owner
 
+    //-----------------------------Owner of the contract-----------------// 
+    address public owner; // Address of the owner
+    uint minimumDeposit; // Determined by the Owner
     constructor(){
         owner = msg.sender; 
     }
-
     modifier adminOnly(){
         require(msg.sender == owner, "Access Granted to the Admins Only");
         _;
@@ -48,47 +53,108 @@ contract Election{
         // Emit Transferownership 
         emit transferOwnershipadd(owner);
     }
-    //------------------------------------------------------------------------------------//
+    //--------------------------------------------------------------------------------------//
     // Election Cycle Events
     string[] ElectionStatus_Arr = ["Not-Started", "OnGoing", "Finished"];
     string public ElectionStatus = ElectionStatus_Arr[0];
-    //------------------------------------------------------------------------------------//
-    //------------------------------------------------------------------------------------//
-    //------------------------------------------------------------------------------------//
-    // Function 1: Add new Candidate
-    uint public candidatesCount = 1; 
-    uint minimumDeposit = 0.01 ether;
+    //--------------------------------------------------------------------------------------//
+    //--------------------------------------------------------------------------------------//
+    // Minimum Deposit Function (Admin Only)
+    function setMinimumDeposit(uint _minimumDeposit) public adminOnly {
+        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[0])), "Election has already started");
+        minimumDeposit = _minimumDeposit;
+    }
+    //-------------------------------------Candidate Details-------------------------------------------------//
+    // Function to register candidate - can only be called by admin
+    uint public candidatesCount = 0;
 
-    function addCandidate(string memory _Candidatename, 
-    string memory _proposal,
-    string memory _party,  
-    address _CandidateAddress,
-    address payable _deposit) public payable adminOnly{
+    function addCandidate(
+        string memory _Candidatename, 
+        string memory _proposal, 
+        string memory _party,  
+        address payable _CandidateAddress
+    ) public adminOnly {
         // Require Conditions
         require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[0])), "Election has already started");
         require(_CandidateAddress != address(0), "Candidate address cannot be zero");
         require(_CandidateAddress != owner, " Admin/Owner of the Contract Cannot Contest Election"); 
-        for(uint i = 1; i < candidatesCount; i++){
+        for(uint i = 1; i <= candidatesCount; i++){
             require(Candidates[i].CandidateAddress != _CandidateAddress, "This candidate is already registered");
         }
         require(bytes(_Candidatename).length > 0, "Candidate name cannot be empty");
         require(bytes(_party).length > 0, "Party name cannot be empty");  
-        require(msg.value >= minimumDeposit, "Minimum deposit amount not met");
-  
 
-        // Adding Candidates 
-        Candidates[candidatesCount] = Candidate(candidatesCount,
-         _Candidatename, 
-         _proposal,
-         _party,
-         _CandidateAddress,
-         _deposit);
+        candidatesCount++; 
 
-         candidatesCount++; 
-         
-         // Emit 
+        // Registering Candidates without deposit yet
+        Candidates[candidatesCount] = Candidate(
+            candidatesCount,
+            _Candidatename, 
+            _proposal,
+            _party,
+            _CandidateAddress,
+            0,
+            true);
+
         emit AddCandidate(candidatesCount, _Candidatename, _proposal, _CandidateAddress);
     }
+    //------------------------------------------------------------------------------------//
+    // Function for candidates to submit deposit - can be called by anyone but checks if the candidate exists
+    function submitDeposit(uint _candidateId) public payable {
+        // Require Conditions
+        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[0])), "Election has already started");
+        require(_candidateId > 0 && _candidateId <= candidatesCount, "Invalid candidate");
+        require(Candidates[_candidateId].CandidateAddress == msg.sender, "Only the candidate can deposit");
+        require(msg.value >= minimumDeposit, "Minimum deposit amount not met");
+        require(Candidates[_candidateId].isRegistered == true, "Candidate is not registered");
+        // Updating candidate's deposit
+        Candidates[_candidateId].depositAmount += msg.value; // add to deposit amount
+
+        // Transfer the deposit
+        //Candidates[_candidateId].CandidateAddress.transfer(msg.value);
+
+        // Emit event for deposit submission
+        emit DepositSubmitted(_candidateId, msg.value);
+    }
+    //------------------------------------------------------------------------------------//
+    // Function for candidates to withdraw their nomination
+    function withdrawNomination(uint _candidateId) public {
+        // Require Conditions
+        require(_candidateId > 0 && _candidateId <= candidatesCount, "Invalid candidate");
+        require(Candidates[_candidateId].CandidateAddress == msg.sender, "Only the candidate can withdraw");
+        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[0])), "Cannot withdraw after the election has started");
+        require(Candidates[_candidateId].isRegistered == true, "Candidate is not registered");
+
+        // Transfer 80% of deposit back to the candidate
+        uint refundAmount = Candidates[_candidateId].depositAmount * 8 / 10;
+        payable(msg.sender).transfer(refundAmount);        
+        Candidates[_candidateId].isRegistered = false;
+
+        // Delete candidate
+        delete Candidates[_candidateId];
+        
+        candidatesCount--;
+        
+        // Emit event for nomination withdrawal
+        emit NominationWithdrawn(_candidateId);
+    }
+    //------------------------------------------------------------------------------------//
+
+    // Function to remove candidate - can only be called by admin
+    function removeCandidate(uint _candidateId) public adminOnly {
+    // Require conditions
+    require(_candidateId > 0 && _candidateId <= candidatesCount, "Invalid candidate");
+    require(Candidates[_candidateId].isRegistered == true, "Candidate is not registered");
+        
+    // Decrease the total number of candidates
+    candidatesCount--;
+    
+    // Remove candidate from the Candidates mapping
+    delete Candidates[_candidateId];
+
+    emit CandidateRemoved(_candidateId);
+    }
+
     //------------------------------------------------------------------------------------//
     // Function 4: Display Candidates Details
     function displayCandidate(uint _CandidateId) public view returns(string memory, 
@@ -96,14 +162,15 @@ contract Election{
     string memory, 
     address){
         // Require Conditions (If any)
-
         return (Candidates[_CandidateId].Candidatename, 
         Candidates[_CandidateId].proposal,
         Candidates[_CandidateId].Party,
         Candidates[_CandidateId].CandidateAddress);
 
     }
-    //------------------------------------------------------------------------------------//
+    //--------------------------------------------------------------------------------------//
+    //--------------------------------------------------------------------------------------//
+    //---------------------------------Voter Details----------------------------------------//
     // Function 2: Add a New Voter 
     uint public VoterCount; 
 
@@ -130,26 +197,38 @@ contract Election{
         return (Voters[_VoterAddress].Votname, 
         Voters[_VoterAddress].votedCandidateId, 
         Voters[_VoterAddress].isDelegated);
-}
+    }
+    //------------------------------------------------------------------------------------//
+    //------------------------------------------------------------------------------------//
     //--------------------------- Start of Elections -------------------------------------//
     //------------------------------------------------------------------------------------//
     // Function 3: Start the Election 
 
     function startElection() public adminOnly{
-        // Require Conditions 
-        // The election should not have already started
-        require(keccak256(bytes(ElectionStatus)) != keccak256(bytes(ElectionStatus_Arr[1])), "Election already started");
-        // The election should not have already ended
-        require(keccak256(bytes(ElectionStatus)) != keccak256(bytes(ElectionStatus_Arr[2])), "Election has already ended");
-        // There should be at least one candidate
-        require(candidatesCount > 1, "There should be at least one candidate");
+    // Require Conditions 
+    // The election should not have already started
+    require(keccak256(bytes(ElectionStatus)) != keccak256(bytes(ElectionStatus_Arr[1])), "Election already started");
+    // The election should not have already ended
+    require(keccak256(bytes(ElectionStatus)) != keccak256(bytes(ElectionStatus_Arr[2])), "Election has already ended");
+    // There should be at least one candidate
+    require(candidatesCount > 1, "There should be at least one candidate");
 
-        // Start 
-        ElectionStatus = ElectionStatus_Arr[1];
-
-        // Emit 
-        emit StartElection(ElectionStatus);
+    // Check the deposit of each candidate
+    for (uint i = 1; i <= candidatesCount; i++) {
+        if (Candidates[i].depositAmount < minimumDeposit) {
+            // Disqualify the candidate
+            delete Candidates[i];
+            candidatesCount--;
+        }
     }
+
+    // Start 
+    ElectionStatus = ElectionStatus_Arr[1];
+
+    // Emit 
+    emit StartElection(ElectionStatus);
+    }
+
     //------------------------------------------------------------------------------------//
     // Function 6: Delegate Voting Rights 
     function delegateVote(address _ownership, address _delegateAddress) public{
@@ -183,14 +262,14 @@ contract Election{
     function castVote(address _Voteraddress, uint _CandidateId) public{
         // Require 
 
-        // Voter should have voting rights left
-        require(Voters[_Voteraddress].voteCount > 0, "No voting rights left");
+        // The election should be ongoing
+        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[1])), "Election is not ongoing");
 
         // Candidate should exist
         require(_CandidateId > 0 && _CandidateId <= candidatesCount, "Candidate does not exist");
 
-        // The election should be ongoing
-        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[1])), "Election is not ongoing");
+        // Voter should have voting rights left
+        require(Voters[_Voteraddress].voteCount > 0, "No voting rights left");
 
         //--------Voting------------
         // Decrease voter's count
@@ -204,36 +283,46 @@ contract Election{
         // Emit
         emit CastVote(_Voteraddress); 
     }
-    //----------------------------Start of Elections--------------------------------------//
+    //--------------------------------------------------------------------------------------//
+    //--------------------------------------------------------------------------------------//
+    //----------------------------End of Elections--------------------------------------//
     //------------------------------------------------------------------------------------//
     // Function 8: End the Election 
     function endElection() public adminOnly {
-        // Require Condtions
-        // The election should be ongoing
-        require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[1])), "Election is not ongoing");
+    // Require Condtions
+    // The election should be ongoing
+    require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[1])), "Election is not ongoing");
 
-        // End the election 
-        ElectionStatus = ElectionStatus_Arr[2];
+    // End the election 
+    ElectionStatus = ElectionStatus_Arr[2];
 
-        // Calculate the minimum threshold for deposit return (e.g., 10% of total votes)
-        uint minimumThreshold = totalVotes * 10 / 100;
+    // Calculate the total number of votes
+    uint totalVotes = 0; 
+    for(uint i = 1; i<= candidatesCount; i++){
+        totalVotes += Votes[i];
+    }
 
-        // Iterate over the candidates to determine deposit return or confiscation
-        for (uint i = 1; i < candidatesCount; i++) {
-            Candidate storage candidate = Candidates[i];
+    // Calculate the minimum threshold for deposit return (e.g., 16% of total votes)
+    uint minimumThreshold = totalVotes * 16 / 100;
 
-            // Return deposit if candidate meets the minimum threshold of votes
-            if (Votes[i] >= minimumThreshold) {
-                candidate.deposit.transfer(candidate.deposit);
-            } else {
+    // Iterate over the candidates to determine deposit return or confiscation
+    for (uint i = 1; i <= candidatesCount; i++) {
+        Candidate storage candidate = Candidates[i];
+
+        // Return deposit if candidate meets the minimum threshold of votes
+        if (Votes[i] >= minimumThreshold) {
+            payable(candidate.CandidateAddress).transfer(candidate.depositAmount);
+        } else {
             // Confiscate deposit by not transferring it back to the candidate
-            continue; 
-            }
+            // Transfer candidate's deposit amount to the owner
+            payable(owner).transfer(candidate.depositAmount);
+            candidate.depositAmount = 0;
+        }
+    }
+    // Emit 
+    emit EndElection(ElectionStatus); 
     }
 
-        // Emit 
-        emit EndElection(ElectionStatus); 
-    }
 
     //------------------------------------------------------------------------------------//
     // Function 5: Show the Winner of the election 
@@ -305,6 +394,9 @@ contract Election{
         );
     }
     //------------------------------------------------------------------------------------//
+    //------------------------------------------------------------------------------------//
+    //------------------------------------------------------------------------------------//
+    //------------------------------------Reset Elections---------------------------------//
     // Function 11: Reset Elections or Conducting Fresh Elections. 
 
     function resetElection() public adminOnly {
@@ -313,7 +405,7 @@ contract Election{
     require(keccak256(bytes(ElectionStatus)) == keccak256(bytes(ElectionStatus_Arr[2])), "Election has not ended yet");
 
     // Reset state variables
-    for (uint i = 1; i < candidatesCount; i++) {
+    for (uint i = 1; i <= candidatesCount; i++) {
         delete Candidates[i];
         delete Votes[i];
     }
@@ -323,5 +415,4 @@ contract Election{
     // Emit
     emit StartElection(ElectionStatus);
     }
-
 }
