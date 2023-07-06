@@ -1,0 +1,86 @@
+//SPDX-License-Identifier: MIT 
+pragma solidity 0.8.20; 
+
+//---------------------------Steps for the project---------------------------// 
+// 1. Adding the owner of the contract (Transfering Ownership)
+contract HealthRecord{
+    //--------------------------- Events in the Contract ---------------------------// 
+    event TransferOwnerShip(address _OldOwner, address _Newowner); 
+
+    //--------------------------- Owner of the contract ---------------------------// 
+
+    address private ownerId; // Address of the contract
+    constructor(){
+        ownerId = msg.sender; // Owner of the contract
+    }
+    modifier onlyOwner() {
+        require(ownerId == msg.sender, "Accessible only to the owner of the contract");
+        _; 
+    }
+    function transferOwner(address _newOwner) public onlyOwner{
+        emit TransferOwnerShip(msg.sender, _newOwner); 
+        ownerId = _newOwner; //Transfering ownership of the contract. 
+    }
+    //--------------------------- Structures ---------------------------// 
+    struct Patient {
+    string name;
+    string email;
+    uint age;
+    string gender;
+    string bloodType;
+    string emergencyContact;
+    }
+
+    struct Doctor {
+    string name;
+    string email;
+    string specialty;
+    uint yearsExperience;
+    string hospitalName;
+    string certification; // Certification details of the doctor
+    string licenseNumber; // Medical license number
+    string education; // Education details of the doctor
+    bool isVerified; // A flag to check whether the doctor's credentials have been verified
+    }
+    //--------------------------- Mapping ---------------------------// 
+    mapping (address => Patient) public PatientRecord; 
+    mapping (address => Doctor) public DoctorRecord; 
+
+    //--------------------------- Functions ---------------------------// 
+    // 1. Adding Patient and Doctor Detials (Need to Add reports and Drugs Details as well)
+    function AddPatient(address _patient, string memory _name, 
+    string memory _email,
+    uint _age,
+    string memory _gender,
+    string memory _bloodType,
+    string memory _emergencyContact) public onlyOwner{
+        PatientRecord[_patient] = Patient(_name,
+        _email,
+        _age,
+        _gender,
+        _bloodType,
+        _emergencyContact); 
+    }
+
+    function AddDoctorRecord(address _doctor,
+    string memory _name,
+    string memory _email,
+    string memory _specialty,
+    uint _yearsExperience,
+    string memory _hospitalName,
+    string memory _certification, // Certification details of the doctor
+    string memory _licenseNumber, // Medical license number
+    string memory _education // Education details of the doctor
+    ) public onlyOwner{
+        DoctorRecord[_doctor] = Doctor(_name,
+        _email,
+        _specialty,
+        _yearsExperience,
+        _hospitalName,
+        _certification,
+        _licenseNumber,
+        _education,
+        false);
+    }
+    // 2. Adding Patient Records
+}
